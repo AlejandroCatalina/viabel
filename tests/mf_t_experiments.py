@@ -120,3 +120,5 @@ n_iters = 5000
 
 fdiv_var_param, fdiv_param_history, _, fdiv_history, _ = \
     adagrad_optimize(n_iters, fdiv_objective_and_grad, init_var_param, learning_rate=.01)
+
+check_approx_accuracy(mf_t_var_family, chivi_var_param, true_mean, true_cov, verbose=True);

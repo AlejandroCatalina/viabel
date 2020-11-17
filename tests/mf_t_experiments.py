@@ -3,6 +3,7 @@
 import sys, os
 sys.path.append('..')
 sys.path.append('../..')
+sys.path.append('../notebooks')
 import autograd
 import pickle
 import pystan
@@ -14,6 +15,7 @@ from viabel import all_bounds
 from viabel.vb import (mean_field_t_variational_family,
                        t_variational_family,
                        black_box_klvi,
+                       black_box_fdiv,
                        black_box_chivi,
                        make_stan_log_density,
                        make_stan_log_density_grad,
@@ -108,3 +110,13 @@ chivi_var_param, chivi_param_history, _,  chivi_history, op_log_chivi = \
     adagrad_optimize(n_iters, chivi_mf_objective_and_grad, init_var_param, learning_rate=.005, k=2)
 
 check_approx_accuracy(mf_t_var_family, chivi_var_param, true_mean, true_cov, verbose=True);
+
+fdiv_objective_and_grad = black_box_fdiv(-1, mf_t_var_family, stan_log_density, 100)
+
+init_mean    = np.zeros(2)
+init_log_std = np.ones(2)
+init_var_param = np.concatenate([init_mean, init_log_std])
+n_iters = 5000
+
+fdiv_var_param, fdiv_param_history, _, fdiv_history, _ = \
+    adagrad_optimize(n_iters, fdiv_objective_and_grad, init_var_param, learning_rate=.01)

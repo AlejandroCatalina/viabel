@@ -3,6 +3,9 @@ from collections import namedtuple
 from autograd import value_and_grad, vector_jacobian_product, jacobian, elementwise_grad
 from autograd.extend import primitive, defvjp
 
+from autograd.wrap_util import unary_to_nary
+from autograd.core import make_vjp
+from autograd.extend import vspace
 import autograd.numpy as np
 import autograd.numpy.random as npr
 import autograd.scipy.stats.multivariate_normal as mvn
@@ -1681,9 +1684,23 @@ def adam_IA_optimize_with_rhat(n_iters, objective_and_grad, init_param, K,
             averaged_variational_sigmas_list,
             np.array(value_history), np.array(log_norm_history), optimisation_log)
 
+def value_and_jacobian(fun, x):
+    """
+    Returns a function which computes `fun` and the Jacobian of `fun` with respect to
+    positional argument number `argnum`, which must be a scalar or array. Unlike
+    `value_and_grad` it is not restricted to scalar-output functions, but also it cannot
+    take derivatives with respect to some argument types (like lists or dicts). If the
+    input to `fun` has shape (in1, in2, ...) and the output has shape (out1, out2, ...)
+    then the Jacobian has shape (out1, out2, ..., in1, in2, ...).
+    """
+    vjp, ans = make_vjp(fun, x)
+    ans_vspace = vspace(ans)
+    jacobian_shape = ans_vspace.shape + vspace(x).shape
+    grads = map(vjp, ans_vspace.standard_basis())
+    return ans, np.reshape(np.stack(grads), jacobian_shape)
+
 def black_box_fdiv(beta, var_family, logdensity, n_samples):
     def compute_g(var_param):
-        """Provides a stochastic estimate of the variational lower bound."""
         samples = var_family.sample(var_param, n_samples)
         return samples
 
@@ -1694,20 +1711,26 @@ def black_box_fdiv(beta, var_family, logdensity, n_samples):
         return compute
 
     def f_w(t, w):
-        return np.mean(w > t)
+        return np.mean(w >= t)
 
     def objective_grad_and_log_norm(var_param):
-        samples, grad_var_param = value_and_grad(compute_g, var_param)
+        samples, grad_var_param = value_and_jacobian(compute_g, var_param)
+        grad_var_param = np.sum(grad_var_param, axis = 1)
 
         compute_logw = compute_log_weights(var_param)
-        log_weights, grad_log_weights = value_and_grad(compute_logw, samples)
+        logw_grad = elementwise_grad(compute_logw)
+        log_weights, grad_log_weights = compute_logw(samples), logw_grad(samples)
+        grad_log_weights = np.sum(grad_log_weights, axis = 1)
 
         weights = np.exp(log_weights - np.max(log_weights))
 
-        gamma = np.array([f(w[i], w) for i in range(len(weights))]) ** beta
+        gamma = np.array([f_w(weights[i], weights) for i in range(len(weights))]) ** beta
         z_gamma = np.sum(gamma)
 
-        obj_grad = 1. / z_gamma * np.sum(gamma * grad_var_param * grad_log_weights)
+        obj_grad = 1. / z_gamma * np.sum(gamma[..., np.newaxis] *
+                                         grad_var_param *
+                                         grad_log_weights[..., np.newaxis],
+                                         axis = 0)
         obj_value = np.NaN
         return (obj_value, obj_grad)
     return objective_grad_and_log_norm

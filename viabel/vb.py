@@ -1700,37 +1700,32 @@ def value_and_jacobian(fun, x):
     return ans, np.reshape(np.stack(grads), jacobian_shape)
 
 def black_box_fdiv(beta, var_family, logdensity, n_samples):
-    def compute_g(var_param):
+    def phi(lopp, logpq):
+        diff = logp - logq
+        norm_diff = diff - np.max(diff)
+        dx = np.exp(norm_diff)
+        prob = np.sign(dx[np.newaxis, ...] - dx[..., np.newaxis])
+        prob = np.array(prob > 0.5, dtype = np.float32)
+        wx = np.sum(prob, axis = 1) / len(logp)
+        wx = (1. - wx) ** beta
+        return wx / np.sum(wx)
+
+    def objective(var_param, samples):
         samples = var_family.sample(var_param, n_samples)
-        return samples
+        logp = logdensity(samples)
+        logq = var_family.logdensity(samples, var_param)
 
-    def compute_log_weights(var_param):
-        def compute(samples):
-            log_weights = logdensity(samples) - var_family.logdensity(samples, var_param)
-            return log_weights
-        return compute
+        unweighted_obj = np.sum(logq - logp)
+        return unweighted_obj
 
-    def f_w(t, w):
-        return np.mean(w >= t)
+    def objective_and_grad(var_param):
+        samples = var_family.sample(var_param, n_samples)
+        logp = logdensity(samples)
+        logq = var_family.logdensity(samples, var_param)
 
-    def objective_grad_and_log_norm(var_param):
-        samples, grad_var_param = value_and_jacobian(compute_g, var_param)
-        grad_var_param = np.sum(grad_var_param, axis = 1)
+        ograd = grad(objective, 0)
+        obj_grad = ograd(var_param, samples)
 
-        compute_logw = compute_log_weights(var_param)
-        logw_grad = elementwise_grad(compute_logw)
-        log_weights, grad_log_weights = compute_logw(samples), logw_grad(samples)
-        grad_log_weights = np.sum(grad_log_weights, axis = 1)
-
-        weights = np.exp(log_weights - np.max(log_weights))
-
-        gamma = np.array([f_w(weights[i], weights) for i in range(len(weights))]) ** beta
-        z_gamma = np.sum(gamma)
-
-        obj_grad = 1. / z_gamma * np.sum(gamma[..., np.newaxis] *
-                                         grad_var_param *
-                                         grad_log_weights[..., np.newaxis],
-                                         axis = 0)
-        obj_value = np.NaN
-        return (obj_value, obj_grad)
-    return objective_grad_and_log_norm
+        weights = phi(logp, logq)
+        return np.sum(weights * (logq - logp)), obj_grad
+    return objective_and_grad

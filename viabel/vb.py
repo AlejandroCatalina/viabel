@@ -26,7 +26,7 @@ import tqdm
 import scipy.stats as stats
 from .tempering_schedule import  adaptive_tempering, sigmoid_tempering, telescope_tempering
 
-from ._distributions import multivariate_t_logpdf
+from ._distributions import multivariate_t_logpdf, MixtureMeanFieldGaussian
 
 from .functions import compute_R_hat, compute_R_hat_adaptive_numpy, compute_R_hat_halfway, stochastic_iterate_averaging
 from .functions import flat_to_triang, triang_to_flat, dlogq_dmu_t, dlogq_dsigma_t
@@ -35,6 +35,7 @@ from .functions import flat_to_triang, triang_to_flat, dlogq_dmu_t, dlogq_dsigma
 __all__ = [
     'mean_field_gaussian_variational_family',
     'mean_field_t_variational_family',
+    'mean_field_gaussian_mixture_variational_family',
     't_variational_family',
     'black_box_klvi',
     'black_box_klvi_pd',
@@ -51,6 +52,51 @@ VariationalFamily = namedtuple('VariationalFamily',
                                 'logdensity', 'mean_and_cov',
                                 'pth_moment', 'var_param_dim'])
 
+def mean_field_gaussian_mixture_variational_family(dim):
+    rs = npr.RandomState(0)
+    mixture = MixtureMeanFieldT(dim, 0)
+    def unpack_params(var_param):
+        rho, mean, log_std = (var_param[0], var_param[1:(dim + 1)],
+                              var_param[(dim + 2):])
+        return rho, mean, log_std
+
+    def add_component(var_param):
+        mixture.add_component(var_param)
+
+    def sample(var_param, n_samples, seed=None, prev=False):
+        my_rs = rs if seed is None else npr.RandomState(seed)
+        if prev:
+            return mixture.sample(n_samples, seed)
+        else:
+            rho, mean, log_std = unpack_params(var_param)
+            return my_rs.randn(n_samples, dim) * np.exp(log_std) + mean
+
+    def entropy(var_param):
+        mean, log_std = unpack_params(var_param)
+        return 0.5 * dim * (1.0 + np.log(2*np.pi)) + np.sum(log_std)
+
+    def logdensity(x, var_param):
+        rho, mean, log_std = unpack_params(var_param)
+        new = mvn.logpdf(x, mean, np.diag(np.exp(2*log_std)))
+        old = mixture.logpdf(x)
+        return (1 - rho) * old + rho * new
+
+    def mean_and_cov(var_param):
+        rho, mean, log_std = unpack_params(var_param)
+        return mean, np.diag(np.exp(2*log_std))
+
+    def pth_moment(p, var_param):
+        if p not in [2,4]:
+            raise ValueError('only p = 2 or 4 supported')
+        _, _, log_std = unpack_params(var_param)
+        vars = np.exp(2*log_std)
+        if p == 2:
+            return np.sum(vars)
+        else:  # p == 4
+            return 2*np.sum(vars**2) + np.sum(vars)**2
+
+    return VariationalFamily(sample, entropy, logdensity,
+                        mean_and_cov, pth_moment, 2*dim)
 
 
 def mean_field_gaussian_variational_family(dim):
@@ -87,9 +133,7 @@ def mean_field_gaussian_variational_family(dim):
             return 2*np.sum(vars**2) + np.sum(vars)**2
 
     return VariationalFamily(sample, entropy, logdensity,
-                             mean_and_cov, pth_moment, 2*dim)
-
-
+                        mean_and_cov, pth_moment, 2*dim)
 
 
 def full_rank_gaussian_variational_family(dim):
@@ -143,8 +187,8 @@ def full_rank_gaussian_variational_family(dim):
         else:  # p == 4
             return 2*np.sum(vars**2) + np.sum(vars)**2
 
-
-    return VariationalFamily(sample, entropy, logdensity, mean_and_cov, pth_moment, dim*(dim+3)//2)
+    return VariationalFamily(sample, entropy, logdensity, mean_and_cov, pth_moment,
+                        dim*(dim+3)//2)
 
 
 def mean_field_t_variational_family(dim, df):
@@ -189,7 +233,7 @@ def mean_field_t_variational_family(dim, df):
             return c**2*(2*(df-1)/(df-4)*np.sum(scales**4) + np.sum(scales**2)**2)
 
     return VariationalFamily(sample, entropy, logdensity,
-                             mean_and_cov, pth_moment, 2*dim)
+                        mean_and_cov, pth_moment, 2*dim)
 
 
 def _get_mu_sigma_pattern(dim):
@@ -240,7 +284,7 @@ def t_variational_family(dim, df):
             return c**2*(2*(df-1)/(df-4)*np.sum(sq_scales**2) + np.sum(sq_scales)**2)
 
     return VariationalFamily(sample, entropy, logdensity, mean_and_cov,
-                             pth_moment, ms_pattern.flat_length(True))
+                        pth_moment, ms_pattern.flat_length(True))
 
 
 def black_box_klvi(var_family, logdensity, n_samples):
@@ -1680,9 +1724,9 @@ def adam_IA_optimize_with_rhat(n_iters, objective_and_grad, init_param, K,
     optimisation_log['khat_iterates'] = khat_iterates_array
     optimisation_log['khat_iterates2'] = khat_iterates_array2
     optimisation_log['khat_iterates_comb'] = khat_combined
-    return (variational_param, variational_param_history_chains, averaged_variational_mean_list,
-            averaged_variational_sigmas_list,
-            np.array(value_history), np.array(log_norm_history), optimisation_log)
+    return (variational_param, variational_param_history_chains,
+       averaged_variational_mean_list, averaged_variational_sigmas_list,
+       np.array(value_history), np.array(log_norm_history), optimisation_log)
 
 def value_and_jacobian(fun, x):
     """
@@ -1699,7 +1743,7 @@ def value_and_jacobian(fun, x):
     grads = map(vjp, ans_vspace.standard_basis())
     return ans, np.reshape(np.stack(grads), jacobian_shape)
 
-def black_box_fdiv(beta, var_family, logdensity, n_samples):
+def black_box_fdiv(beta, var_family, logdensity, n_samples, mixture = False):
     def phi(lopp, logpq):
         diff = logp - logq
         norm_diff = diff - np.max(diff)
@@ -1711,7 +1755,6 @@ def black_box_fdiv(beta, var_family, logdensity, n_samples):
         return wx / np.sum(wx)
 
     def objective(var_param, samples):
-        samples = var_family.sample(var_param, n_samples)
         logp = logdensity(samples)
         logq = var_family.logdensity(samples, var_param)
 
@@ -1725,7 +1768,28 @@ def black_box_fdiv(beta, var_family, logdensity, n_samples):
 
         ograd = grad(objective, 0)
         obj_grad = ograd(var_param, samples)
+        if mixture:
+            samples_prev = var_family.sample(var_param, n_samples, prev = True)
+            logp_prev = logdensity(samples_prev)
+            logq_prev = var_family.logdensity(samples_prev, var_param)
+            obj_grad_prev = ograd(var_param, samples_prev)
+            obj_grad = obj_grad + obj_grad_prev
+            weights_prev = phi(logp_prev, logq_prev)
+            obj_prev = np.sum(weights * (logq - logp))
 
         weights = phi(logp, logq)
-        return np.sum(weights * (logq - logp)), obj_grad
+        obj = np.sum(weights * (logq - logp))
+        if mixture:
+            rho = var_param[0]
+            return (1 - rho) * obj_prev + rho * obj, obj_grad
+        return obj, obj_grad
     return objective_and_grad
+
+def variational_boosting(var_family, iters = 100):
+    # for every iteration
+    #   fit current component
+    #   if new rho is 0 (or very close to 0)
+    #     converge and exit
+    #   else
+    #     add new component
+    pass

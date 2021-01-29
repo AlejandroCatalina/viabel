@@ -683,10 +683,14 @@ class NeuralNet(ApproximationFamily):
 
 
 class NVPFlow(ApproximationFamily):
-    def __init__(self, layers_t, layers_s, mask, prior, prior_param):
+    def __init__(self, layers_t, layers_s, mask, prior, prior_param, dim,  seed = 1):
         assert len(layers_t) == len(layers_s)
         self.prior = prior
         self.prior_param = prior_param
+        self._dim = dim
+        self._rs = npr.RandomState(seed)
+        self._supports_kl = False
+        self._supports_entropy = True
         self.mask = mask
         self._pattern = PatternDict(free_default = True)
         self.t = [NeuralNet(layers_t) for _ in range(len(mask))]
@@ -718,14 +722,22 @@ class NVPFlow(ApproximationFamily):
         return z, log_det_J
 
     def log_density(self, var_param, x):
-        z, logp = self.f(x)
-        return self.prior.log_density(z) + logp
+        z, logp = self.f(var_param, x)
+        return self.prior.log_density(self.prior_param, z) + logp
 
     def sample(self, var_param, n_samples):
-        z = self.prior.sample((n_samples, 1))
+        self.n_samples = n_samples
+        z = self.prior.sample(self.prior_param, int(n_samples))
         logp = self.prior.log_density(self.prior_param, z)
         x = self.g(var_param, z)
         return x
+
+    def entropy(self, var_param):
+        eps = self._rs.randn(int(self.n_samples), int(self._dim))
+        zs, ldet_sum = self.f(var_param, eps)
+        lls = mvn.logpdf(eps, mean=np.zeros(self._dim), cov=np.eye(self._dim)) - ldet_sum
+        ldet_mean = np.mean(ldet_sum)
+        return ldet_mean
 
     def mean_and_cov(self, var_param):
         samples = self.sample(var_param, 200000)

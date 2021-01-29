@@ -725,9 +725,9 @@ class NVPFlow(ApproximationFamily):
         z, logp = self.f(var_param, x)
         return self.prior.log_density(self.prior_param, z) + logp
 
-    def sample(self, var_param, n_samples):
+    def sample(self, var_param, n_samples, seed = 1):
         self.n_samples = n_samples
-        z = self.prior.sample(self.prior_param, int(n_samples))
+        z = self.prior.sample(self.prior_param, int(n_samples), seed = seed)
         logp = self.prior.log_density(self.prior_param, z)
         x = self.g(var_param, z)
         return x

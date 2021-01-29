@@ -693,9 +693,9 @@ class NVPFlow(ApproximationFamily):
         self._supports_entropy = True
         self.mask = mask
         self._pattern = PatternDict(free_default = True)
-        self.t = [NeuralNet(layers_t) for _ in range(len(mask))]
-        self.s = [NeuralNet(layers_s, nonlinearity = lambda x: x)
+        self.t = [NeuralNet(layers_t, nonlinearity = lambda x: x)
                   for _ in range(len(mask))]
+        self.s = [NeuralNet(layers_s) for _ in range(len(mask))]
         for l in range(len(mask)):
             self._pattern[str(l) + "t"] = self.t[l]._pattern
             self._pattern[str(l) + "s"] = self.s[l]._pattern

@@ -311,7 +311,7 @@ class SASA(Optimizer):
         learning_rate = self._sgo._learning_rate
         variational_param = init_param.copy()
         variational_param_mean = init_param.copy()
-        k = init_param.size//2
+        k = self._dim
         value_history = []
         Delta_history = []
         variational_param_history = []

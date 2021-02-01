@@ -741,7 +741,7 @@ class NVPFlow(ApproximationFamily):
 
     def mean_and_cov(self, var_param):
         samples = self.sample(var_param, 200000)
-        return np.mean(samples), np.cov(samples)
+        return np.mean(samples, axis = 0), np.cov(samples.T)
 
     def _pth_moment(self, var_param, p):
         pass

@@ -507,7 +507,7 @@ class InclusiveKL(StochasticVariationalObjective):
 
 
         self._objective_and_grad = objective_grad_and_log_norm_t
-        #self._objective_and_grad = objective_grad_and_log_norm
+        self._objective_and_grad = objective_grad_and_log_norm
 
 
 class Per_KL(StochasticVariationalObjective):

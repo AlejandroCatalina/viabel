@@ -210,14 +210,14 @@ class FDiv(StochasticVariationalObjective):
 
 
         # manually compute objective and gradient
-        def objective_grad_and_log_norm(var_param, mode=3):
+        def objective_grad_and_log_norm(var_param, mode=2):
             #seed = self.seed
             seed = npr.randint(2 ** 32)
 
             if mode == 1:
                 samples = self.approx.sample(var_param, self.num_mc_samples)
                 logp = self.model(samples)
-                logq = self.approx.log_density(samples, var_param)
+                logq = self.approx.log_density(var_param, samples)
 
                 ograd = grad(objective, 0)
                 obj_grad = ograd(var_param, samples)
@@ -233,7 +233,7 @@ class FDiv(StochasticVariationalObjective):
             samples = compute_g(var_param)
             compute_logw = compute_log_weights(var_param)
             particle_grads = elementwise_grad(compute_logw)(samples)
-            log_weights = compute_log_weights2(var_param, seed)
+            log_weights = compute_logw(samples)
 
             pmz_len = len(var_param)
             n_theta = pmz_len // 2
@@ -248,15 +248,8 @@ class FDiv(StochasticVariationalObjective):
             if mode == 2:
                 transform_grad = jacobian(samples_fn)(var_param)
                 a1 = np.transpose(transform_grad, (0, 2, 1))
-                b1 = np.transpose(particle_grads[:, None], (2, 1, 0))
-                # grad_t1 = np.dot(a1,b1)
-
-                l = a1.shape[1]
-
-                grad_t2 = np.zeros((self.num_mc_samples, l))
-                for i in range(l):
-                    c1 = np.diag(np.dot(a1[:, i, :], b1[:, 0, :]))
-                    grad_t2[:, i] = c1
+                grad_t2 = np.diagonal(np.tensordot(
+                    a1, particle_grads, axes=([2], [1])), axis1=0, axis2=2).T
 
                 obj_grad_all = -(1. / z_gamma) * np.mean(gamma1 * grad_t2, axis=0)
                 # print(obj_grad_all.shape)

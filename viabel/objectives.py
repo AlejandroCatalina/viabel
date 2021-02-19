@@ -468,7 +468,11 @@ class InclusiveKL(StochasticVariationalObjective):
             weights_snis = np.nan_to_num(weights_all) /np.nansum(weights_all)
             weights_snis1=np.nan_to_num(weights_snis)
 
-            idx_sample = np.random.choice(num_mc_samples +1, 1, p=weights_snis1.flatten())
+            try:
+                idx_sample = np.random.choice(num_mc_samples +1, 1, p=weights_snis1.flatten())
+            except:
+                idx_sample = num_mc_samples
+
             weight_sample = samples_all[idx_sample]
             obj_grad = np.concatenate([dlogq_dmu_t(weight_sample, var_param[:k], var_param[k:], approx.df),
                         dlogq_dsigma_t(weight_sample, var_param[:k], var_param[k:], approx.df)])
